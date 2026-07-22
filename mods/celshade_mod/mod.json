@@ -1,0 +1,7 @@
+{
+  "id": "com.botopai50.celshade_mod",
+  "name": "Cel Shading",
+  "version": "1.0.0",
+  "author": "Botopai50",
+  "description": "Lightweight three-band cel shading with depth/normal outlines, rim lighting, saturation and contrast controls."
+}
