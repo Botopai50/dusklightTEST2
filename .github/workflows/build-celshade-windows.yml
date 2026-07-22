@@ -1,4 +1,4 @@
-name: Build Celshade Windows
+name: Build Shipwright Celshade Windows
 
 on:
   workflow_dispatch:
@@ -10,11 +10,10 @@ on:
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'cmake/**'
+      - 'scripts/apply_shipwright_celshade.py'
       - 'sdk/**'
       - 'src/**'
       - 'include/**'
-      - 'mods/celshade_mod/**'
-      - 'mods/ao_mod/CMakeLists.txt'
       - 'extern/aurora'
       - '.gitmodules'
   pull_request:
@@ -25,11 +24,10 @@ on:
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'cmake/**'
+      - 'scripts/apply_shipwright_celshade.py'
       - 'sdk/**'
       - 'src/**'
       - 'include/**'
-      - 'mods/celshade_mod/**'
-      - 'mods/ao_mod/CMakeLists.txt'
       - 'extern/aurora'
       - '.gitmodules'
 
@@ -37,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: celshade-windows-${{ github.event.pull_request.number || github.ref }}
+  group: shipwright-celshade-windows-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -49,7 +47,7 @@ env:
 
 jobs:
   build-windows-x64:
-    name: Windows x64 + Celshade
+    name: Windows x64 + Integrated Toon Lighting
     runs-on: windows-latest
     timeout-minutes: 120
 
@@ -78,12 +76,29 @@ jobs:
           choco install ninja --no-progress -y
           vcpkg install freetype:x64-windows zstd:x64-windows
 
-      - name: Configure CMake
+      - name: Configure CMake and patch Aurora
         shell: pwsh
         run: |
           cmake --preset x-windows-ci-msvc `
             -DDUSK_ENABLE_CODE_MODS=ON `
+            -DDUSK_ENABLE_SHIPWRIGHT_CELSHADE=ON `
             -DDUSK_ENABLE_SENTRY_NATIVE=OFF
+
+      - name: Verify integrated shader patch
+        shell: pwsh
+        run: |
+          $gx = 'extern/aurora/lib/gx/gx.hpp'
+          $shader = 'extern/aurora/lib/gx/shader.cpp'
+
+          if (-not (Select-String -Path $gx -Pattern 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL' -Quiet)) {
+            throw "Per-pixel toon-lighting marker was not applied to $gx"
+          }
+          if (-not (Select-String -Path $shader -Pattern 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN' -Quiet)) {
+            throw "Material-integrated toon-lighting marker was not applied to $shader"
+          }
+
+          Write-Host 'Aurora contains the integrated Shipwright-style celshade patch.'
+          git -C extern/aurora diff -- lib/gx/gx.hpp lib/gx/shader.cpp
 
       - name: Build and install Dusklight
         shell: pwsh
@@ -93,47 +108,40 @@ jobs:
           $result = $LASTEXITCODE
 
           if ($result -ne 0) {
-            Write-Host '========== BUILD FAILURE (LAST 250 LINES) =========='
-            Get-Content $log -Tail 250
+            Write-Host '========== BUILD FAILURE (LAST 300 LINES) =========='
+            Get-Content $log -Tail 300
             Write-Host '===================================================='
             exit $result
           }
 
-          Write-Host '========== BUILD SUCCESS (LAST 80 LINES) =========='
-          Get-Content $log -Tail 80
+          Write-Host '========== BUILD SUCCESS (LAST 100 LINES) ========='
+          Get-Content $log -Tail 100
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: celshade-windows-build-log-${{ github.run_number }}
+          name: shipwright-celshade-build-log-${{ github.run_number }}
           path: build.log
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify Celshade package
+      - name: Verify installed game
         shell: pwsh
         run: |
-          $mod = 'build/install/mods/celshade_mod.dusk'
-          if (-not (Test-Path $mod)) {
-            Write-Host 'Installed mods directory:'
-            if (Test-Path 'build/install/mods') {
-              Get-ChildItem 'build/install/mods' -Recurse | Format-Table FullName, Length
-            }
-            throw "Celshade package was not generated: $mod"
+          $executables = Get-ChildItem 'build/install' -Filter '*.exe' -File
+          if ($executables.Count -eq 0) {
+            Write-Host 'Install directory contents:'
+            Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
+            throw 'No Dusklight executable was installed.'
           }
 
-          $size = (Get-Item $mod).Length
-          if ($size -le 0) {
-            throw "Celshade package is empty: $mod"
-          }
-
-          Write-Host "Celshade package ready: $mod ($size bytes)"
+          $executables | Format-Table Name, Length
 
       - name: Create portable ZIP
         shell: pwsh
         run: |
-          $zip = 'dusklight-celshade-windows-x64.zip'
+          $zip = 'dusklight-shipwright-celshade-windows-x64.zip'
           if (Test-Path $zip) {
             Remove-Item $zip -Force
           }
@@ -142,9 +150,7 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v7
         with:
-          name: dusklight-celshade-windows-x64-${{ github.run_number }}
-          path: |
-            dusklight-celshade-windows-x64.zip
-            build/install/mods/celshade_mod.dusk
+          name: dusklight-shipwright-celshade-windows-x64-${{ github.run_number }}
+          path: dusklight-shipwright-celshade-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
