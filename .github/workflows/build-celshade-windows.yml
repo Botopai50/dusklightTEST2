@@ -44,6 +44,8 @@ env:
   VCPKG_ROOT: C:\vcpkg
   CMAKE_BUILD_PARALLEL_LEVEL: '4'
   DUSK_ENABLE_SENTRY_NATIVE: 'OFF'
+  SCCACHE_GHA_ENABLED: 'true'
+  RUSTC_WRAPPER: 'sccache'
 
 jobs:
   build-windows-x64:
@@ -66,6 +68,9 @@ jobs:
       - name: Restore VCPKG_ROOT
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_ENV -Value 'VCPKG_ROOT=C:\vcpkg'
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Install build dependencies
         shell: pwsh
