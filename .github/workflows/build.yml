@@ -2,12 +2,18 @@ name: Build Windows Manual
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: agent/celshade-mod
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-manual-${{ github.ref }}
+  group: windows-manual-${{ inputs.source_ref }}
   cancel-in-progress: true
 
 env:
@@ -24,11 +30,19 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout selected source
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.source_ref }}
           fetch-depth: 0
           submodules: recursive
+
+      - name: Show selected revision
+        shell: pwsh
+        run: |
+          Write-Host "Requested source: ${{ inputs.source_ref }}"
+          git status --short --branch
+          git rev-parse HEAD
 
       - name: Enable Visual Studio environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -70,7 +84,6 @@ jobs:
           }
 
           Write-Host 'Aurora contains the integrated Shipwright-style celshade patch.'
-          git -C extern/aurora diff -- lib/gx/gx.hpp lib/gx/shader.cpp
 
       - name: Build and install Dusklight
         shell: pwsh
@@ -107,7 +120,6 @@ jobs:
             Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
             throw 'No Dusklight executable was installed.'
           }
-
           $executables | Format-Table Name, Length
 
       - name: Create portable ZIP
