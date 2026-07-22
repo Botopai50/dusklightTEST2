@@ -1,7 +1,7 @@
-# Breath of the Wild Visual Suite v2.2
+# Breath of the Wild Visual Suite v2.3
 
-v2.2 keeps the complete BOTW-inspired feature set and fixes the two regressions reported in v2:
-texture distortion and a projected shadow that stayed soft even at high map resolutions.
+v2.3 keeps the complete BOTW-inspired feature set while replacing the expensive default shadow-map
+path with a lightweight directional screen-space shadow.
 
 ## Effects retained
 
@@ -17,36 +17,50 @@ texture distortion and a projected shadow that stayed soft even at high map reso
 - stylized water tint, shimmer, Fresnel and shoreline emphasis;
 - radial sun shafts with scene-depth occlusion;
 - selective depth of field only when the game requests blur;
-- texture stylization and edge anti-aliasing;
-- projected dynamic shadows.
+- texture-safe bilateral stylization and depth-aware edge anti-aliasing.
 
-## Texture-safe corrections
+## Lightweight directional shadow
 
-The systems above were corrected instead of disabled:
+The default shadow is now integrated into the BOTW visual pass that already reads scene depth. It:
 
-- texture stylization is now a small bilateral cleanup applied only to low-detail regions;
-- posterization and color quantization were removed;
-- high-contrast texture patterns, faces and text are excluded automatically;
-- edge AA uses scene depth and never averages foreground with background;
-- foliage, skin, metal and water masks use narrower color, saturation, luminance, normal and depth
-  conditions;
-- rain wetness starts only after real rain accumulates and strongly excludes skin and foliage;
-- all effects use new v2.2 configuration keys, so aggressive values saved by older builds are ignored.
+- performs no second scene render;
+- allocates no shadow map;
+- uses 5 depth samples on Low/Mobile, 7 on Medium and 9 on High;
+- fades with distance and exits early when it finds an occluder;
+- follows the real sun/moon direction;
+- preserves the original Twilight Princess actor/blob shadows;
+- is intended to work through Dawn on Vulkan, D3D12 and OpenGL ES backends.
 
-Defaults are intentionally moderate, but every system remains adjustable from the in-game controls.
+Controls:
 
-## Sharp projected shadows
+- `Directional Shadow`: strength of the lightweight shadow;
+- `Shadow Reach`: screen-space ray length toward the sun. Lower values are cheaper and more stable.
 
-The projected-shadow preset uses:
+Defaults are 30% strength and 260 units of reach.
 
-- 4096 shadow map on Windows and 2048 on Android;
-- 3000-unit coverage on Windows and 2600 on Android;
-- 12-unit default bias;
-- 6-texel edge fade;
+## Optional full shadow map
+
+The old scene-replay shadow map remains available as a separate high-end option, but is disabled by
+default. It is intended mainly for Vulkan or strong desktop GPUs.
+
+The optional path was reduced to:
+
+- actor/object caster lists only, without replaying terrain lists;
+- 2048 on Windows and 1024 on Android;
+- 2600-unit coverage on Windows and 2200 on Android;
+- depth-only snapshot during normal use;
 - no PCF by default;
-- true nearest-depth comparison when `Soft Shadows` is set to `Off`;
-- optional 3x3 or 5x5 filtering only when explicitly selected.
+- original game shadows disabled only while this optional full-map mode is active.
 
-Map resolution alone did not fix the previous shadow because the `Off` path still performed a hidden
-bilinear comparison. v2.2 removes that filtering from the hard-shadow path and increases effective
-texel density by tightening the light-camera coverage.
+This substantially reduces its cost, but it remains more expensive and less portable than the
+default screen-space path.
+
+## Texture-safe corrections retained from v2.2
+
+- texture stylization is a small bilateral cleanup applied only to low-detail regions;
+- posterization and color quantization are removed;
+- high-contrast texture patterns, faces and text are excluded automatically;
+- edge AA uses scene depth and does not average foreground with background;
+- foliage, skin, metal and water masks use narrow color, saturation, luminance, normal and depth
+  conditions;
+- rain wetness starts only after real rain accumulates and strongly excludes skin and foliage.
