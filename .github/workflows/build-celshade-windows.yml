@@ -82,7 +82,29 @@ jobs:
 
       - name: Build and install Dusklight
         shell: pwsh
-        run: cmake --build --preset x-windows-ci-msvc --parallel 4
+        run: |
+          $log = 'build.log'
+          & cmake --build --preset x-windows-ci-msvc --parallel 4 *>&1 | Out-File -FilePath $log -Encoding utf8
+          $result = $LASTEXITCODE
+
+          if ($result -ne 0) {
+            Write-Host '========== BUILD FAILURE (LAST 250 LINES) =========='
+            Get-Content $log -Tail 250
+            Write-Host '===================================================='
+            exit $result
+          }
+
+          Write-Host '========== BUILD SUCCESS (LAST 80 LINES) =========='
+          Get-Content $log -Tail 80
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: celshade-windows-build-log-${{ github.run_number }}
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Verify Celshade package
         shell: pwsh
