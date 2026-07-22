@@ -1,7 +1,7 @@
 {
   "id": "dev.botopai50.botw_visual_mod",
-  "name": "Breath of the Wild Visual Pass",
-  "version": "1.0.0",
+  "name": "Breath of the Wild Visual Suite v2",
+  "version": "2.0.0",
   "author": "Botopai50",
-  "description": "BOTW-inspired color grading, lifted shadows, atmospheric depth fog, selective bloom, lightweight contact AO and stylized water response. Designed to complement the integrated material cel shading."
+  "description": "Complete BOTW-inspired rendering suite: dynamic time and weather, atmospheric sky and fog, stylized materials and textures, foliage transmission, wet surfaces, water, bloom, contact AO, edge AA, sun shafts and selective depth of field. Includes adaptive Windows and Android quality presets."
 }
