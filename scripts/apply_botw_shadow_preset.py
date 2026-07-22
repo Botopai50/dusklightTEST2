@@ -63,6 +63,7 @@ def patch_shadow_source(root: Path) -> bool:
     result = register_int_option("bias", 55, g_cvarBias, error);
 '''
     new = '''    // DUSKLIGHT_SHARP_SHADOW_V21
+    // DUSKLIGHT_BOTW_SHADOW_PRESET (legacy workflow marker)
     // Reset the persisted v2 values by using new keys. Definition depends more on coverage and
     // filtering than on raw resolution: Windows uses 4096 with a tight box; Android uses 2048.
 #if defined(__ANDROID__)
