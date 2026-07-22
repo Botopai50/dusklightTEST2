@@ -1,7 +1,7 @@
 {
   "id": "dev.botopai50.botw_visual_mod",
-  "name": "Breath of the Wild Visual Suite v2.1",
-  "version": "2.1.0",
+  "name": "Breath of the Wild Visual Suite v2.2",
+  "version": "2.2.0",
   "author": "Botopai50",
-  "description": "Texture-safe BOTW-inspired lighting pass. Preserves original Twilight Princess textures, keeps conservative grading, fog, bloom and AO, and pairs with a sharp projected-shadow preset using true hard depth comparison when soft filtering is disabled."
+  "description": "Full BOTW-inspired visual suite with texture-safe bilateral stylization, depth-aware edge AA, conservative material masks, dynamic sky and weather, foliage transmission, rain wetness, water, bloom, AO, sun rays, selective DOF and sharply defined projected shadows."
 }
