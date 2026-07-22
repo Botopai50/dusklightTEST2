@@ -50,6 +50,12 @@ fn coord_uv(coord: vec2i) -> vec2f {
     return (vec2f(coord) + vec2f(0.5)) * u.inv_size;
 }
 
+fn safe_normalize(value: vec3f, fallback: vec3f) -> vec3f {
+    let length_squared = dot(value, value);
+    let normalized = value * inverseSqrt(max(length_squared, 0.000000000001));
+    return select(fallback, normalized, length_squared > 0.0000000001);
+}
+
 fn unproject_view(uv: vec2f, depth: f32) -> vec3f {
     let ndc = vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
     let view4 = u.view_from_proj * ndc;
@@ -74,7 +80,7 @@ fn reconstruct_normal(coord: vec2i) -> vec3f {
     let dy1 = down - center;
     let dx = select(dx1, dx0, dot(dx0, dx0) < dot(dx1, dx1));
     let dy = select(dy1, dy0, dot(dy0, dy0) < dot(dy1, dy1));
-    return normalize(cross(dy, dx));
+    return safe_normalize(cross(dy, dx), vec3f(0.0, 0.0, 1.0));
 }
 
 fn luminance(color: vec3f) -> f32 {
@@ -83,23 +89,23 @@ fn luminance(color: vec3f) -> f32 {
 
 fn bright_part(color: vec3f, threshold: f32) -> vec3f {
     let luma = luminance(color);
-    let weight = smoothstep(threshold, min(threshold + 0.22, 1.0), luma);
+    let weight = smoothstep(threshold, threshold + 0.22, luma);
     return color * weight;
 }
 
+// Five taps are intentionally used instead of a multi-pass blur. This retains selective glow
+// while keeping the Android path affordable and avoiding an extra render target.
 fn sample_bloom(coord: vec2i, threshold: f32) -> vec3f {
-    var sum = bright_part(load_color(coord), threshold) * 0.20;
-    sum += bright_part(load_color(coord + vec2i(2, 0)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(-2, 0)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(0, 2)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(0, -2)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(3, 3)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(-3, 3)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(3, -3)), threshold) * 0.10;
-    sum += bright_part(load_color(coord + vec2i(-3, -3)), threshold) * 0.10;
+    var sum = bright_part(load_color(coord), threshold) * 0.28;
+    sum += bright_part(load_color(coord + vec2i(3, 0)), threshold) * 0.18;
+    sum += bright_part(load_color(coord + vec2i(-3, 0)), threshold) * 0.18;
+    sum += bright_part(load_color(coord + vec2i(0, 3)), threshold) * 0.18;
+    sum += bright_part(load_color(coord + vec2i(0, -3)), threshold) * 0.18;
     return sum;
 }
 
+// Four depth taps provide broad contact grounding. The integrated material shader supplies the
+// fine shape definition, so an expensive GTAO chain is unnecessary for the default BOTW preset.
 fn contact_ao(coord: vec2i, center_distance: f32) -> f32 {
     let radius = 2;
     let scale = max(center_distance * 0.018, 2.0);
@@ -108,11 +114,7 @@ fn contact_ao(coord: vec2i, center_distance: f32) -> f32 {
     occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(-radius, 0))), 0.0) / scale);
     occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(0, radius))), 0.0) / scale);
     occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(0, -radius))), 0.0) / scale);
-    occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(radius, radius))), 0.0) / scale);
-    occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(-radius, radius))), 0.0) / scale);
-    occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(radius, -radius))), 0.0) / scale);
-    occ += smoothstep(0.04, 1.0, max(center_distance - length(view_position(coord + vec2i(-radius, -radius))), 0.0) / scale);
-    return clamp(occ * 0.125, 0.0, 1.0);
+    return clamp(occ * 0.25, 0.0, 1.0);
 }
 
 fn aces_filmic(x: vec3f) -> vec3f {
@@ -129,28 +131,28 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let coord = clamp_coord(vec2i(in.position.xy));
     let raw = load_color(coord);
     let depth = load_depth(coord);
+    let depth_to_far = select(depth, 1.0 - depth, u.flags.x != 0u);
+    let geometry_mask = 1.0 - smoothstep(0.996, 1.0, depth_to_far);
     let view_pos = unproject_view(in.uv, depth);
     let distance_to_camera = length(view_pos);
     let normal = reconstruct_normal(coord);
-    let view_dir = normalize(-view_pos);
+    let view_dir = safe_normalize(-view_pos, vec3f(0.0, 0.0, 1.0));
 
     let style = clamp(u.params3.x, 0.0, 1.0);
     var color = max(raw, vec3f(0.0));
 
     // Lightweight contact AO: restrained enough to reinforce grounding without dirty outlines.
-    if (u.params2.z > 0.001) {
+    if (u.params2.z > 0.001 && geometry_mask > 0.001) {
         let ao = contact_ao(coord, distance_to_camera);
-        let ao_factor = 1.0 - ao * u.params2.z * 0.34 * style;
+        let ao_factor = 1.0 - ao * u.params2.z * 0.34 * style * geometry_mask;
         color *= ao_factor;
     }
 
     // Cyan + approximately horizontal + non-sky mask for a cheap stylized water response.
-    if (u.params2.y > 0.001) {
+    if (u.params2.y > 0.001 && geometry_mask > 0.001) {
         let cyan_bias = min(color.g, color.b) - color.r * 0.72;
         let cyan_mask = smoothstep(0.025, 0.24, cyan_bias);
         let horizontal_mask = smoothstep(0.30, 0.82, abs(normal.y));
-        let far_depth = select(depth, 1.0 - depth, u.flags.x != 0u);
-        let geometry_mask = 1.0 - smoothstep(0.996, 1.0, far_depth);
         let water_mask = cyan_mask * horizontal_mask * geometry_mask;
         let fresnel = pow(clamp(1.0 - abs(dot(normal, view_dir)), 0.0, 1.0), 3.0);
         let shimmer = 0.5 + 0.5 * sin((in.uv.x * 410.0 + in.uv.y * 270.0) + u.params2.w * 1.7);
