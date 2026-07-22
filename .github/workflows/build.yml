@@ -1,4 +1,4 @@
-name: Build Windows and Android Manual
+name: Build BOTW Visual Suite Windows and Android
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-android-manual-${{ inputs.source_ref }}
+  group: botw-suite-manual-${{ inputs.source_ref }}
   cancel-in-progress: true
 
 env:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build-windows-x64:
-    name: Windows x64 + Shipwright Celshade
+    name: Windows x64 + BOTW Visual Suite v2
     runs-on: windows-latest
     timeout-minutes: 120
     env:
@@ -63,28 +63,31 @@ jobs:
           choco install ninja --no-progress -y
           vcpkg install freetype:x64-windows zstd:x64-windows
 
-      - name: Configure CMake and patch Aurora
+      - name: Configure BOTW visual suite
         shell: pwsh
         run: |
           cmake --preset x-windows-ci-msvc `
             -DDUSK_ENABLE_CODE_MODS=ON `
             -DDUSK_ENABLE_SHIPWRIGHT_CELSHADE=ON `
+            -DDUSK_ENABLE_BOTW_VISUAL_SUITE=ON `
             -DDUSK_ENABLE_SENTRY_NATIVE=OFF
 
-      - name: Verify integrated shader patch
+      - name: Verify BOTW renderer transforms
         shell: pwsh
         run: |
-          $gx = 'extern/aurora/lib/gx/gx.hpp'
-          $shader = 'extern/aurora/lib/gx/shader.cpp'
-
-          if (-not (Select-String -Path $gx -Pattern 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL' -Quiet)) {
-            throw "Per-pixel toon-lighting marker was not applied to $gx"
+          $checks = @(
+            @{ Path = 'extern/aurora/lib/gx/gx.hpp'; Marker = 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL' },
+            @{ Path = 'extern/aurora/lib/gx/shader.cpp'; Marker = 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN' },
+            @{ Path = 'mods/shadow_mod/src/mod.cpp'; Marker = 'DUSKLIGHT_BOTW_SHADOW_PRESET' },
+            @{ Path = 'mods/shadow_mod/res/shadow.wgsl'; Marker = 'DUSKLIGHT_BOTW_COLORED_SHADOW' },
+            @{ Path = 'mods/botw_visual_mod/res/botw_visual.wgsl'; Marker = 'DUSKLIGHT_BOTW_WGSL_PORTABILITY' }
+          )
+          foreach ($check in $checks) {
+            if (-not (Select-String -Path $check.Path -Pattern $check.Marker -Quiet)) {
+              throw "Required BOTW marker '$($check.Marker)' was not applied to $($check.Path)"
+            }
           }
-          if (-not (Select-String -Path $shader -Pattern 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN' -Quiet)) {
-            throw "Material-integrated toon-lighting marker was not applied to $shader"
-          }
-
-          Write-Host 'Aurora contains the integrated Shipwright-style celshade patch.'
+          Write-Host 'All BOTW renderer and projected-shadow transforms are present.'
 
       - name: Build and install Windows
         shell: pwsh
@@ -94,39 +97,52 @@ jobs:
           $result = $LASTEXITCODE
 
           if ($result -ne 0) {
-            Write-Host '========== WINDOWS BUILD FAILURE (LAST 300 LINES) =========='
-            Get-Content $log -Tail 300
+            Write-Host '========== WINDOWS BUILD FAILURE (LAST 400 LINES) =========='
+            Get-Content $log -Tail 400
             Write-Host '============================================================'
             exit $result
           }
 
-          Write-Host '========== WINDOWS BUILD SUCCESS (LAST 100 LINES) ========='
-          Get-Content $log -Tail 100
+          Write-Host '========== WINDOWS BUILD SUCCESS (LAST 120 LINES) ========='
+          Get-Content $log -Tail 120
 
       - name: Upload Windows build log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shipwright-celshade-windows-log-${{ github.run_number }}
+          name: botw-suite-v2-windows-log-${{ github.run_number }}
           path: windows-build.log
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify installed Windows game
+      - name: Verify installed Windows game and mods
         shell: pwsh
         run: |
           $executables = Get-ChildItem 'build/install' -Filter '*.exe' -File
           if ($executables.Count -eq 0) {
-            Write-Host 'Install directory contents:'
             Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
             throw 'No Dusklight Windows executable was installed.'
           }
+
+          $visualMods = Get-ChildItem 'build/install' -Recurse -File | Where-Object {
+            $_.Name -match 'botw_visual_mod|shadow_mod'
+          }
+          if (($visualMods | Where-Object Name -Match 'botw_visual_mod').Count -eq 0) {
+            Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
+            throw 'BOTW visual-suite mod was not installed.'
+          }
+          if (($visualMods | Where-Object Name -Match 'shadow_mod').Count -eq 0) {
+            Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
+            throw 'Projected-shadow mod was not installed.'
+          }
+
           $executables | Format-Table Name, Length
+          $visualMods | Format-Table FullName, Length
 
       - name: Create Windows portable ZIP
         shell: pwsh
         run: |
-          $zip = 'dusklight-shipwright-celshade-windows-x64.zip'
+          $zip = 'dusklight-botw-visual-suite-v2-windows-x64.zip'
           if (Test-Path $zip) {
             Remove-Item $zip -Force
           }
@@ -135,13 +151,13 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v7
         with:
-          name: dusklight-shipwright-celshade-windows-x64-${{ github.run_number }}
-          path: dusklight-shipwright-celshade-windows-x64.zip
+          name: dusklight-botw-visual-suite-v2-windows-x64-${{ github.run_number }}
+          path: dusklight-botw-visual-suite-v2-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
 
   build-android-arm64:
-    name: Android ARM64 + Shipwright Celshade
+    name: Android ARM64 + BOTW Visual Suite v2
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -187,17 +203,23 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.10
 
-      - name: Configure Android CMake and patch Aurora
+      - name: Configure BOTW visual suite for Android
         run: |
           cmake --preset x-android-ci-arm64 \
+            -DDUSK_ENABLE_CODE_MODS=ON \
             -DDUSK_ENABLE_SHIPWRIGHT_CELSHADE=ON \
+            -DDUSK_ENABLE_BOTW_VISUAL_SUITE=ON \
             -DDUSK_ENABLE_SENTRY_NATIVE=OFF
 
-      - name: Verify integrated shader patch
+      - name: Verify BOTW renderer transforms
         run: |
+          set -euxo pipefail
           grep -q 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL' extern/aurora/lib/gx/gx.hpp
           grep -q 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN' extern/aurora/lib/gx/shader.cpp
-          echo 'Aurora contains the integrated Shipwright-style celshade patch.'
+          grep -q 'DUSKLIGHT_BOTW_SHADOW_PRESET' mods/shadow_mod/src/mod.cpp
+          grep -q 'DUSKLIGHT_BOTW_COLORED_SHADOW' mods/shadow_mod/res/shadow.wgsl
+          grep -q 'DUSKLIGHT_BOTW_WGSL_PORTABILITY' mods/botw_visual_mod/res/botw_visual.wgsl
+          echo 'All BOTW renderer and projected-shadow transforms are present.'
 
       - name: Build Android native library and bundled mods
         run: |
@@ -207,11 +229,18 @@ jobs:
             cmake --build --preset x-android-ci-arm64 --target dusklight_mods --parallel 4
           } 2>&1 | tee android-build.log
 
+      - name: Verify Android bundled mods
+        run: |
+          set -euxo pipefail
+          find build -type f -name 'botw_visual_mod.dusk' -print -quit | grep -q .
+          find build -type f -name 'shadow_mod.dusk' -print -quit | grep -q .
+          find build -type f \( -name 'botw_visual_mod.dusk' -o -name 'shadow_mod.dusk' \) -print
+
       - name: Upload Android build log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shipwright-celshade-android-log-${{ github.run_number }}
+          name: botw-suite-v2-android-log-${{ github.run_number }}
           path: android-build.log
           if-no-files-found: warn
           retention-days: 14
@@ -242,7 +271,7 @@ jobs:
           APKSIGNER="$BUILD_TOOLS/apksigner"
           KEYSTORE="$RUNNER_TEMP/dusklight-ci.keystore"
           ALIGNED_APK="$RUNNER_TEMP/dusklight-aligned.apk"
-          SIGNED_APK="$RUNNER_TEMP/dusklight-shipwright-celshade-arm64-v8a-signed.apk"
+          SIGNED_APK="$RUNNER_TEMP/dusklight-botw-visual-suite-v2-arm64-v8a-signed.apk"
 
           test -x "$ZIPALIGN"
           test -x "$APKSIGNER"
@@ -255,7 +284,7 @@ jobs:
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -dname 'CN=Dusklight Test Build,O=Botopai50,C=BR'
+            -dname 'CN=Dusklight BOTW Suite Test Build,O=Botopai50,C=BR'
 
           "$ZIPALIGN" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
           "$APKSIGNER" sign \
@@ -269,14 +298,14 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK"
 
           mkdir -p upload/android upload/sdk
-          cp "$SIGNED_APK" upload/android/dusklight-shipwright-celshade-arm64-v8a-signed.apk
+          cp "$SIGNED_APK" upload/android/dusklight-botw-visual-suite-v2-arm64-v8a-signed.apk
           cp build/*/stub-android-*.so upload/sdk/
           find upload -maxdepth 3 -type f -print
 
       - name: Upload signed Android build
         uses: actions/upload-artifact@v7
         with:
-          name: dusklight-shipwright-celshade-android-arm64-signed-${{ github.run_number }}
+          name: dusklight-botw-visual-suite-v2-android-arm64-signed-${{ github.run_number }}
           path: upload/
           if-no-files-found: error
           retention-days: 14
