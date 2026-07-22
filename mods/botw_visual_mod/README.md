@@ -26,7 +26,9 @@ The stable effects remain available with conservative defaults:
 - low-strength contact AO.
 
 New configuration keys reset any aggressive values saved by v2. Original game textures are sampled
-directly and are no longer averaged or quantized by the finishing pass.
+directly and are no longer averaged or quantized by the finishing pass. Controls for the disabled
+experimental effects may still be visible in the current menu layout, but the v2.1 compiled preset
+ignores them so they cannot distort the scene again.
 
 ## Sharp projected shadows
 
