@@ -1,4 +1,4 @@
-name: Build Windows Manual
+name: Build Windows and Android Manual
 
 on:
   workflow_dispatch:
@@ -13,11 +13,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-manual-${{ inputs.source_ref }}
+  group: desktop-android-manual-${{ inputs.source_ref }}
   cancel-in-progress: true
 
 env:
-  VCPKG_ROOT: C:\vcpkg
   CMAKE_BUILD_PARALLEL_LEVEL: '4'
   DUSK_ENABLE_SENTRY_NATIVE: 'OFF'
   SCCACHE_GHA_ENABLED: 'true'
@@ -28,6 +27,8 @@ jobs:
     name: Windows x64 + Shipwright Celshade
     runs-on: windows-latest
     timeout-minutes: 120
+    env:
+      VCPKG_ROOT: C:\vcpkg
 
     steps:
       - name: Checkout selected source
@@ -85,44 +86,44 @@ jobs:
 
           Write-Host 'Aurora contains the integrated Shipwright-style celshade patch.'
 
-      - name: Build and install Dusklight
+      - name: Build and install Windows
         shell: pwsh
         run: |
-          $log = 'build.log'
+          $log = 'windows-build.log'
           & cmake --build --preset x-windows-ci-msvc --parallel 4 *>&1 | Out-File -FilePath $log -Encoding utf8
           $result = $LASTEXITCODE
 
           if ($result -ne 0) {
-            Write-Host '========== BUILD FAILURE (LAST 300 LINES) =========='
+            Write-Host '========== WINDOWS BUILD FAILURE (LAST 300 LINES) =========='
             Get-Content $log -Tail 300
-            Write-Host '===================================================='
+            Write-Host '============================================================'
             exit $result
           }
 
-          Write-Host '========== BUILD SUCCESS (LAST 100 LINES) ========='
+          Write-Host '========== WINDOWS BUILD SUCCESS (LAST 100 LINES) ========='
           Get-Content $log -Tail 100
 
-      - name: Upload build log
+      - name: Upload Windows build log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shipwright-celshade-build-log-${{ github.run_number }}
-          path: build.log
+          name: shipwright-celshade-windows-log-${{ github.run_number }}
+          path: windows-build.log
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify installed game
+      - name: Verify installed Windows game
         shell: pwsh
         run: |
           $executables = Get-ChildItem 'build/install' -Filter '*.exe' -File
           if ($executables.Count -eq 0) {
             Write-Host 'Install directory contents:'
             Get-ChildItem 'build/install' -Recurse | Format-Table FullName, Length
-            throw 'No Dusklight executable was installed.'
+            throw 'No Dusklight Windows executable was installed.'
           }
           $executables | Format-Table Name, Length
 
-      - name: Create portable ZIP
+      - name: Create Windows portable ZIP
         shell: pwsh
         run: |
           $zip = 'dusklight-shipwright-celshade-windows-x64.zip'
@@ -136,5 +137,107 @@ jobs:
         with:
           name: dusklight-shipwright-celshade-windows-x64-${{ github.run_number }}
           path: dusklight-shipwright-celshade-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build-android-arm64:
+    name: Android ARM64 + Shipwright Celshade
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ANDROID_NDK_VERSION: '29.0.14206865'
+
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show selected revision
+        run: |
+          echo "Requested source: ${{ inputs.source_ref }}"
+          git status --short --branch
+          git rev-parse HEAD
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK and NDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Install Rust Android target
+        run: |
+          rustup toolchain install stable
+          rustup target add aarch64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Configure Android CMake and patch Aurora
+        run: |
+          cmake --preset x-android-ci-arm64 \
+            -DDUSK_ENABLE_SHIPWRIGHT_CELSHADE=ON \
+            -DDUSK_ENABLE_SENTRY_NATIVE=OFF
+
+      - name: Verify integrated shader patch
+        run: |
+          grep -q 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL' extern/aurora/lib/gx/gx.hpp
+          grep -q 'DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN' extern/aurora/lib/gx/shader.cpp
+          echo 'Aurora contains the integrated Shipwright-style celshade patch.'
+
+      - name: Build Android native library and bundled mods
+        run: |
+          set -o pipefail
+          {
+            cmake --build --preset x-android-ci-arm64 --target dusklight --parallel 4
+            cmake --build --preset x-android-ci-arm64 --target dusklight_mods --parallel 4
+          } 2>&1 | tee android-build.log
+
+      - name: Upload Android build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shipwright-celshade-android-log-${{ github.run_number }}
+          path: android-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stage Android JNI library
+        env:
+          ANDROID_STAGE_ABIS: arm64-v8a
+        run: platforms/android/scripts/stage-jni-libs.sh
+
+      - name: Build Android APK
+        working-directory: platforms/android
+        run: ./gradlew :app:assembleRelease --rerun-tasks
+
+      - name: Verify and stage Android APK
+        run: |
+          set -euxo pipefail
+          APK='platforms/android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk'
+          test -s "$APK"
+          mkdir -p upload/android upload/sdk
+          cp "$APK" upload/android/dusklight-shipwright-celshade-arm64-v8a.apk
+          cp build/*/stub-android-*.so upload/sdk/
+          find upload -maxdepth 3 -type f -print
+
+      - name: Upload Android build
+        uses: actions/upload-artifact@v7
+        with:
+          name: dusklight-shipwright-celshade-android-arm64-${{ github.run_number }}
+          path: upload/
           if-no-files-found: error
           retention-days: 14
