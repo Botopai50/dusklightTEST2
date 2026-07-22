@@ -1,27 +1,44 @@
-# Breath of the Wild Visual Suite v2
+# Breath of the Wild Visual Suite v2.1
 
-This bundled mod complements the renderer-integrated cel shading with effects that belong after
-scene rendering. It uses the game's real environment state instead of a fixed color preset.
+This revision keeps the renderer-integrated toon lighting while restoring the original Twilight
+Princess texture texels. The first v2 preset was too aggressive because it applied full-screen
+neighbor averaging, posterization and color-based material guesses to the whole scene.
 
-## Implemented systems
+## Texture-safe rendering
 
-- Dynamic grading driven by Twilight Princess time of day, rain, clouds and twilight state.
-- Analytic sky, horizon, sun/moon glow and lightweight procedural clouds.
-- Depth atmosphere using the game's current fog and sky colors.
-- Approximate screen-space material classification for foliage, skin, metal and water.
-- Warm foliage transmission, readable skin shadows and compact colored metal highlights.
-- Persistent rain wetness with darkened albedo and sky-colored Fresnel/specular response.
-- Stylized water tint, shimmer, Fresnel and shoreline emphasis.
-- Texture-detail grouping for a cleaner painted look without replacing original assets.
-- Lightweight edge anti-aliasing and hard-band stability.
-- Selective bloom, contact AO, sun shafts and game-triggered depth of field.
-- Low, Medium and High quality modes plus adaptive resolution/device sample caps.
-- Debug views for material masks, normals, fog, wetness, foliage, sky, rays and DOF.
+The v2.1 preset permanently disables the unsafe full-screen effects:
 
-The material shader remains responsible for the hard two-tone light boundary, cool indirect light,
-warm direct light, stylized GX specular response, restrained rim light and material-aware shadow
-retention. The existing shadow-map mod is configured at build time with a lighter BOTW preset and a
-cool blue-gray projected-shadow multiplier.
+- texture posterization and painted-detail grouping;
+- neighbor-based edge blur over texture details;
+- color-based foliage, skin, metal and water recoloring;
+- global rain wetness material guessing;
+- analytic sky replacement over the original skybox;
+- gameplay depth of field and radial sun-ray blur.
 
-Android defaults to the Low/Mobile quality tier. Windows defaults to Medium. Every visible effect
-can be adjusted or disabled from the mod controls without rebuilding the game.
+The stable effects remain available with conservative defaults:
+
+- renderer-integrated hard two-tone cel shading;
+- cool indirect light and warm direct light;
+- restrained rim and stylized GX specular response;
+- dynamic environment-aware color grading;
+- subtle depth fog;
+- low-strength selective bloom;
+- low-strength contact AO.
+
+New configuration keys reset any aggressive values saved by v2. Original game textures are sampled
+directly and are no longer averaged or quantized by the finishing pass.
+
+## Sharp projected shadows
+
+The projected-shadow preset now uses:
+
+- 4096 shadow map on Windows and 2048 on Android;
+- a tighter 3500-unit coverage radius;
+- 15-unit default bias;
+- 8-texel edge fade;
+- no PCF by default;
+- true nearest-depth comparison when `Soft Shadows` is set to `Off`;
+- optional 3x3 or 5x5 filtering only when explicitly selected.
+
+Increasing map resolution alone did not fix v2 because even the `Off` option still performed a
+bilinear four-comparison filter. That hidden filter has been removed from the hard-shadow path.
