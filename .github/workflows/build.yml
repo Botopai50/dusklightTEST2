@@ -189,7 +189,6 @@ jobs:
       - name: Configure Android CMake and patch Aurora
         run: |
           cmake --preset x-android-ci-arm64 \
-            -DDUSK_ENABLE_CODE_MODS=ON \
             -DDUSK_ENABLE_SHIPWRIGHT_CELSHADE=ON \
             -DDUSK_ENABLE_SENTRY_NATIVE=OFF
 
@@ -233,7 +232,7 @@ jobs:
           mkdir -p upload/android upload/sdk
           cp "$APK" upload/android/dusklight-shipwright-celshade-arm64-v8a.apk
           cp build/*/stub-android-*.so upload/sdk/
-          find upload -type f -maxdepth 3 -print
+          find upload -maxdepth 3 -type f -print
 
       - name: Upload Android build
         uses: actions/upload-artifact@v7
