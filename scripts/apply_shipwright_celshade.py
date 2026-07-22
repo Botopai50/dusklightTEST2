@@ -17,15 +17,17 @@ GX_MARKER = "DUSKLIGHT_SHIPWRIGHT_CELSHADE_PER_PIXEL"
 SHADER_BEGIN = "DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN"
 SHADER_END = "DUSKLIGHT_SHIPWRIGHT_CELSHADE_END"
 
-# Centralized defaults. The post-process mod also exposes runtime controls for perceived shadow
-# brightness, grading, fog, AO, bloom and water. These constants define the material response.
-SHADOW_STRENGTH = 0.55       # 0 = no toon darkening, 1 = ambient-only shadow
-SHADOW_TINT_STRENGTH = 0.28  # cool sky / warm ground tint in shadowed regions
-WARM_LIGHT_STRENGTH = 0.10   # warms direct light without changing light selection
-RIM_STRENGTH = 0.10          # restrained back-light edge response
-SPECULAR_STRENGTH = 0.24     # stylized GX specular band contribution
-RAMP_LOW = 0.485
-RAMP_HIGH = 0.515
+# Centralized material defaults. The post-process mod exposes runtime controls for the finishing
+# pass; these values define the actual GX material response and therefore remain build-time.
+SHADOW_STRENGTH = 0.50       # 0 = no toon darkening, 1 = ambient-only shadow
+SHADOW_TINT_STRENGTH = 0.30  # cool sky / warm ground tint in shadowed regions
+WARM_LIGHT_STRENGTH = 0.11   # warms direct light without changing light selection
+RIM_STRENGTH = 0.085         # restrained back-light edge response
+SPECULAR_STRENGTH = 0.22     # stylized GX specular band contribution
+FOLIAGE_TRANSMISSION = 0.16  # green/gold back-light on likely vegetation colors
+SKIN_SHADOW_LIFT = 0.12      # keeps warm skin-like materials readable in the dark band
+RAMP_LOW = 0.487
+RAMP_HIGH = 0.513
 
 
 def replace_exact(path: Path, old: str, new: str) -> bool:
@@ -60,9 +62,9 @@ def patch_gx_header(aurora_dir: Path) -> bool:
 def generated_shader_block() -> str:
     return f'''  // {SHADER_BEGIN}
   // BOTW-inspired material lighting. Alpha and unlit channels keep the original GX path.
-  // Diffuse channels use a hard half-Lambert band, cool indirect light, warm direct light,
-  // lifted shadows and a restrained back-light rim. GX specular channels are quantized into
-  // a small colored highlight instead of using an unrestricted glossy response.
+  // Diffuse channels use a hard half-Lambert band, hemisphere indirect light, warm direct light,
+  // lifted shadows and approximate material masks derived from the material color. GX specular
+  // channels are quantized into a small colored highlight instead of unrestricted gloss.
   const bool botwDiffuseEligible = !alpha && diffFn != GX_DF_NONE && cc.attnFn != GX_AF_SPEC;
   const bool botwSpecularEligible = !alpha && cc.attnFn == GX_AF_SPEC;
   if (botwDiffuseEligible) {{
@@ -71,6 +73,16 @@ def generated_shader_block() -> str:
     {{{{
       let botw_nrm = normalize({{10}});
       let botw_view_dir = normalize(-{{6}}.xyz);
+      let botw_mat_rgb = clamp({{4}}.rgb, vec3f(0.0), vec3f(1.0));
+      let botw_mat_luma = dot(botw_mat_rgb, vec3f(0.2126, 0.7152, 0.0722));
+      let botw_mat_sat = max(botw_mat_rgb.r, max(botw_mat_rgb.g, botw_mat_rgb.b)) -
+          min(botw_mat_rgb.r, min(botw_mat_rgb.g, botw_mat_rgb.b));
+      let botw_foliage_mask = smoothstep(
+          0.015, 0.20, botw_mat_rgb.g - max(botw_mat_rgb.r, botw_mat_rgb.b) * 0.86);
+      let botw_skin_mask = smoothstep(0.035, 0.22, botw_mat_rgb.r - botw_mat_rgb.b) *
+          smoothstep(0.14, 0.78, botw_mat_luma) *
+          (1.0 - smoothstep(0.48, 0.88, botw_mat_sat));
+
       var botw_ambient = {{5}};
       var botw_light_color = vec4f(0.0);
       var botw_light_dir = vec3f(0.0, 0.0, 1.0);
@@ -97,8 +109,8 @@ def generated_shader_block() -> str:
       let botw_half_lambert = clamp(dot(botw_nrm, botw_light_dir) * 0.5 + 0.5, 0.0, 1.0);
       let botw_ramp = smoothstep({RAMP_LOW:.6f}, {RAMP_HIGH:.6f}, botw_half_lambert);
 
-      // Hemisphere-style indirect color. View-space Y remains aligned to camera-up in normal play,
-      // providing a stable cool-sky / warm-ground separation without another texture or light.
+      // Hemisphere-style indirect color. View-space Y stays aligned to camera-up during normal
+      // gameplay, giving a stable cool-sky / warm-ground split without another texture lookup.
       let botw_sky_factor = clamp(botw_nrm.y * 0.5 + 0.5, 0.0, 1.0);
       let botw_ground_tint = vec3f(0.94, 0.88, 0.82);
       let botw_sky_tint = vec3f(0.78, 0.90, 1.10);
@@ -114,16 +126,26 @@ def generated_shader_block() -> str:
       let botw_direct = vec4f(botw_light_color.rgb * botw_warm_scale, botw_light_color.a);
       let botw_lit = botw_tinted_ambient + botw_direct;
 
-      // Preserve part of the direct light inside the dark band. This is intentionally brighter
-      // than the previous ambient-only shadow and fixes crushed faces and clothing indoors.
-      let botw_shadow = botw_tinted_ambient + botw_direct * {1.0 - SHADOW_STRENGTH:.6f};
+      // Skin-like warm materials keep more direct light in the dark band; cloth, stone and wood
+      // retain the stronger toon separation.
+      let botw_shadow_retention = clamp(
+          {1.0 - SHADOW_STRENGTH:.6f} + botw_skin_mask * {SKIN_SHADOW_LIFT:.6f}, 0.0, 0.82);
+      let botw_shadow = botw_tinted_ambient + botw_direct * botw_shadow_retention;
       var botw_lighting = mix(botw_shadow, botw_lit, botw_ramp);
 
-      // Restrained back-light rim. It is geometric and light-aware, so it does not draw a black
-      // outline or add a constant halo around every object.
+      // Approximate vegetation transmission from material color and back-light direction.
+      let botw_transmission = pow(max(dot(-botw_nrm, botw_light_dir), 0.0), 1.55) *
+          botw_foliage_mask * {FOLIAGE_TRANSMISSION:.6f};
+      let botw_leaf_color = mix(vec3f(0.08, 0.22, 0.025), botw_direct.rgb, 0.42);
+      botw_lighting = vec4f(
+          botw_lighting.rgb + botw_leaf_color * botw_transmission, botw_lighting.a);
+
+      // Restrained back-light rim. Foliage receives less rim because transmission already separates
+      // its silhouette; this avoids bright halos around every leaf card.
       let botw_fresnel = pow(clamp(1.0 - max(dot(botw_nrm, botw_view_dir), 0.0), 0.0, 1.0), 3.0);
       let botw_backlight = smoothstep(0.05, 0.75, max(dot(-botw_light_dir, botw_view_dir), 0.0));
-      let botw_rim = botw_fresnel * botw_backlight * {RIM_STRENGTH:.6f};
+      let botw_rim = botw_fresnel * botw_backlight * {RIM_STRENGTH:.6f} *
+          (1.0 - botw_foliage_mask * 0.55);
       let botw_rim_color = mix(vec3f(0.42, 0.62, 0.92), botw_direct.rgb, 0.30);
       botw_lighting = vec4f(botw_lighting.rgb + botw_rim_color * botw_rim, botw_lighting.a);
 
@@ -147,7 +169,7 @@ def generated_shader_block() -> str:
           var attn: f32;{{2}}
           var diff = {{3}};
           let botw_spec_signal = max(attn * max(diff, 0.0), 0.0);
-          let botw_spec_band = smoothstep(0.42, 0.72, botw_spec_signal);
+          let botw_spec_band = smoothstep(0.44, 0.70, botw_spec_signal);
           let botw_spec_color = light.color * vec4f(1.08, 1.03, 0.92, 1.0);
           botw_spec_lighting = botw_spec_lighting +
               botw_spec_band * botw_spec_color * {SPECULAR_STRENGTH:.6f};
