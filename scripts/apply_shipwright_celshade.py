@@ -45,7 +45,7 @@ def patch_gx_header(aurora_dir: Path) -> bool:
 
 def patch_shader_generator(aurora_dir: Path) -> bool:
     path = aurora_dir / "lib/gx/shader.cpp"
-    old = '''  return fmt::format(R\"\"\"(
+    old = '''  return fmt::format(R"""(
     {{
       var lighting = {5};
       for (var i = 0u; i < {1}u; i++) {{
@@ -60,9 +60,9 @@ def patch_shader_generator(aurora_dir: Path) -> bool:
           lighting = lighting + (attn * diff * light.color);
       }}
       {7}{8} = ({4} * clamp(lighting, vec4f(0.0), vec4f(1.0))){8};
-    }})\"\"\",
+    }})""",
                      i, GX::MaxLights, lightAttnFn, lightDiffFn, matSrc, ambSrc, posVar, outVar, swizzle,
-                     alpha ? \"a\"sv : \"\"sv);
+                     alpha ? "a"sv : ""sv);
 '''
     new = '''  // DUSKLIGHT_SHIPWRIGHT_CELSHADE_BEGIN
   // Match the Ship of Harkinian renderer: only diffuse RGB lighting is replaced. Alpha,
@@ -70,8 +70,8 @@ def patch_shader_generator(aurora_dir: Path) -> bool:
   // particles, water and special TEV materials retain their intended behavior.
   const bool shipwrightToonEligible = !alpha && diffFn != GX_DF_NONE && cc.attnFn != GX_AF_SPEC;
   if (shipwrightToonEligible) {
-    const std::string_view normalVar = UsePerPixelLighting ? \"in.mv_nrm\"sv : \"mv_nrm\"sv;
-    return fmt::format(R\"\"\"(
+    const std::string_view normalVar = UsePerPixelLighting ? "in.mv_nrm"sv : "mv_nrm"sv;
+    return fmt::format(R"""(
     {{
       let toon_nrm = normalize({10});
       var toon_ambient = {5};
@@ -98,22 +98,21 @@ def patch_shader_generator(aurora_dir: Path) -> bool:
           }}
       }}
 
-      // Same half-Lambert two-tone ramp used by the Shipwright cel-shading branch.
-      // Center 0.5 means the division occurs around N dot L = 0. Softness 0.1 keeps
-      // the boundary stable under animation while remaining visibly hard.
+      // Hard two-tone half-Lambert ramp. The narrow 0.485..0.515 transition keeps the
+      // shadow edge stable under animation while making it substantially sharper than before.
       let toon_half_lambert = clamp(dot(toon_nrm, toon_light_dir) * 0.5 + 0.5, 0.0, 1.0);
-      let toon_ramp = smoothstep(0.4, 0.6, toon_half_lambert);
+      let toon_ramp = smoothstep(0.485, 0.515, toon_half_lambert);
       let toon_lit = toon_ambient + toon_light_color;
       let toon_shadow = toon_ambient;
       let toon_lighting = mix(toon_shadow, toon_lit, toon_ramp);
       {7}{8} = ({4} * clamp(toon_lighting, vec4f(0.0), vec4f(1.0))){8};
-    }})\"\"\",
+    }})""",
                        i, GX::MaxLights, lightAttnFn, lightDiffFn, matSrc, ambSrc, posVar, outVar,
-                       swizzle, alpha ? \"a\"sv : \"\"sv, normalVar);
+                       swizzle, alpha ? "a"sv : ""sv, normalVar);
   }
   // DUSKLIGHT_SHIPWRIGHT_CELSHADE_END
 
-  return fmt::format(R\"\"\"(
+  return fmt::format(R"""(
     {{
       var lighting = {5};
       for (var i = 0u; i < {1}u; i++) {{
@@ -128,9 +127,9 @@ def patch_shader_generator(aurora_dir: Path) -> bool:
           lighting = lighting + (attn * diff * light.color);
       }}
       {7}{8} = ({4} * clamp(lighting, vec4f(0.0), vec4f(1.0))){8};
-    }})\"\"\",
+    }})""",
                      i, GX::MaxLights, lightAttnFn, lightDiffFn, matSrc, ambSrc, posVar, outVar, swizzle,
-                     alpha ? \"a\"sv : \"\"sv);
+                     alpha ? "a"sv : ""sv);
 '''
     return replace_exact(path, old, new, SHADER_MARKER)
 
