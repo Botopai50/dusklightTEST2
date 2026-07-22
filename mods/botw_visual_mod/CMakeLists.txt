@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(ao_mod CXX)
+project(botw_visual_mod CXX)
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(DUSK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." CACHE PATH "Path to dusk source root")
@@ -12,17 +12,10 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endif ()
 endif ()
 
-add_mod(ao_mod
-    FEATURES webgpu
+add_mod(botw_visual_mod
+    FEATURES game webgpu
     SOURCES  src/mod.cpp
     MOD_JSON mod.json
     RES_DIR  res
     BUNDLE
 )
-
-# Keep the upstream root CMake file untouched: the BOTW finishing pass is bundled alongside the
-# existing in-tree visual mods whenever Dusklight creates its aggregate mod target.
-if (TARGET dusklight_mods AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../botw_visual_mod/CMakeLists.txt")
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../botw_visual_mod"
-                     "${CMAKE_CURRENT_BINARY_DIR}/../botw_visual_mod")
-endif ()

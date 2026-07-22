@@ -1,0 +1,7 @@
+{
+  "id": "dev.botopai50.botw_visual_mod",
+  "name": "Breath of the Wild Visual Suite v2.3",
+  "version": "2.3.0",
+  "author": "Botopai50",
+  "description": "Full BOTW-inspired visual suite with a lightweight cross-backend directional shadow integrated into the existing depth pass. Keeps texture-safe stylization, dynamic sky and weather, foliage, wetness, water, bloom, AO, sun rays and selective DOF. The expensive actor shadow map is now optional and disabled by default."
+}

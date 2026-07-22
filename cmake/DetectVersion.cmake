@@ -5,6 +5,10 @@ get_filename_component(_DUSK_VERSION_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUT
 
 set(DUSK_SENTRY_DSN "" CACHE STRING "Sentry DSN")
 set(DUSK_SENTRY_ENVIRONMENT "development" CACHE STRING "Sentry environment")
+option(DUSK_ENABLE_SHIPWRIGHT_CELSHADE
+        "Use integrated Ship of Harkinian-style per-pixel toon lighting" ON)
+option(DUSK_ENABLE_BOTW_VISUAL_SUITE
+        "Enable BOTW visual-suite renderer and projected-shadow presets" ON)
 
 set(DUSK_VERSION_OVERRIDE "" CACHE STRING "Override version string (skips git detection and format validation)")
 
@@ -91,6 +95,67 @@ macro(detect_version)
             set(DUSK_VERSION_CODE "1")
         endif ()
 
+    endif ()
+
+    find_program(_DUSK_PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+
+    # Aurora is a submodule. Patch its shader generator before add_subdirectory(extern/aurora)
+    # so the compiled renderer uses material-integrated lighting rather than a fullscreen filter.
+    if (DUSK_ENABLE_SHIPWRIGHT_CELSHADE AND
+            EXISTS "${_DUSK_VERSION_ROOT}/extern/aurora/lib/gx/shader.cpp")
+        execute_process(
+                COMMAND "${_DUSK_PYTHON_EXECUTABLE}"
+                        "${_DUSK_VERSION_ROOT}/scripts/apply_shipwright_celshade.py"
+                        --aurora-dir "${_DUSK_VERSION_ROOT}/extern/aurora"
+                WORKING_DIRECTORY "${_DUSK_VERSION_ROOT}"
+                RESULT_VARIABLE _dusk_celshade_result
+                OUTPUT_VARIABLE _dusk_celshade_output
+                ERROR_VARIABLE _dusk_celshade_error
+        )
+        if (NOT _dusk_celshade_result EQUAL 0)
+            message(FATAL_ERROR
+                    "Failed to apply integrated Shipwright celshade:\n${_dusk_celshade_output}${_dusk_celshade_error}")
+        endif ()
+        string(STRIP "${_dusk_celshade_output}" _dusk_celshade_output)
+        message(STATUS "${_dusk_celshade_output}")
+    endif ()
+
+    # Apply the v2.2 visual and sharp-shadow base transform first.
+    if (DUSK_ENABLE_BOTW_VISUAL_SUITE AND
+            EXISTS "${_DUSK_VERSION_ROOT}/mods/shadow_mod/src/mod.cpp")
+        execute_process(
+                COMMAND "${_DUSK_PYTHON_EXECUTABLE}"
+                        "${_DUSK_VERSION_ROOT}/scripts/apply_botw_shadow_preset.py"
+                        --root "${_DUSK_VERSION_ROOT}"
+                WORKING_DIRECTORY "${_DUSK_VERSION_ROOT}"
+                RESULT_VARIABLE _dusk_botw_shadow_result
+                OUTPUT_VARIABLE _dusk_botw_shadow_output
+                ERROR_VARIABLE _dusk_botw_shadow_error
+        )
+        if (NOT _dusk_botw_shadow_result EQUAL 0)
+            message(FATAL_ERROR
+                    "Failed to apply BOTW projected-shadow preset:\n${_dusk_botw_shadow_output}${_dusk_botw_shadow_error}")
+        endif ()
+        string(STRIP "${_dusk_botw_shadow_output}" _dusk_botw_shadow_output)
+        message(STATUS "${_dusk_botw_shadow_output}")
+
+        # v2.3 replaces the expensive default with a short depth raymarch inside the existing BOTW
+        # finishing pass. The full scene-replay shadow map remains available as an optional mode.
+        execute_process(
+                COMMAND "${_DUSK_PYTHON_EXECUTABLE}"
+                        "${_DUSK_VERSION_ROOT}/scripts/apply_botw_lightweight_shadow.py"
+                        --root "${_DUSK_VERSION_ROOT}"
+                WORKING_DIRECTORY "${_DUSK_VERSION_ROOT}"
+                RESULT_VARIABLE _dusk_light_shadow_result
+                OUTPUT_VARIABLE _dusk_light_shadow_output
+                ERROR_VARIABLE _dusk_light_shadow_error
+        )
+        if (NOT _dusk_light_shadow_result EQUAL 0)
+            message(FATAL_ERROR
+                    "Failed to apply BOTW lightweight shadow preset:\n${_dusk_light_shadow_output}${_dusk_light_shadow_error}")
+        endif ()
+        string(STRIP "${_dusk_light_shadow_output}" _dusk_light_shadow_output)
+        message(STATUS "${_dusk_light_shadow_output}")
     endif ()
 
     # Add version information to CI environment variables
