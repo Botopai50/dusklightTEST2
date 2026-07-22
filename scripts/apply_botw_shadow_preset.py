@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Apply the lightweight BOTW projected-shadow preset to the in-tree shadow mod.
+"""Apply build-time BOTW presets and WGSL portability fixes.
 
-The shadow mod is kept close to upstream. This configure-time transform changes only stable preset
-values and the final multiply color, making the projected shadow usable by default on Windows and
-Android without duplicating the shadow-map implementation.
+The upstream shadow-map implementation is retained. This transform changes only stable defaults,
+the final shadow multiply color, and two explicit WGSL expressions that stricter mobile validators
+require to be fully typed.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 
 SOURCE_MARKER = "DUSKLIGHT_BOTW_SHADOW_PRESET"
 SHADER_MARKER = "DUSKLIGHT_BOTW_COLORED_SHADOW"
+VISUAL_MARKER = "DUSKLIGHT_BOTW_WGSL_PORTABILITY"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -95,7 +96,7 @@ def patch_source(root: Path) -> bool:
     return True
 
 
-def patch_shader(root: Path) -> bool:
+def patch_shadow_shader(root: Path) -> bool:
     path = root / "mods/shadow_mod/res/shadow.wgsl"
     text = path.read_text(encoding="utf-8")
     if SHADER_MARKER in text:
@@ -129,6 +130,38 @@ def patch_shader(root: Path) -> bool:
     return True
 
 
+def patch_visual_wgsl(root: Path) -> bool:
+    path = root / "mods/botw_visual_mod/res/botw_visual.wgsl"
+    text = path.read_text(encoding="utf-8")
+    if VISUAL_MARKER in text:
+        print(f"BOTW WGSL portability fixes already applied: {path}")
+        return False
+
+    old_hash = '''fn hash12(p: vec2f) -> f32 {
+    let p3 = fract(vec3f(p.xyx) * 0.1031);
+    let q = p3 + dot(p3, p3.yzx + vec3f(33.33));
+    return fract((q.x + q.y) * q.z);
+}
+'''
+    new_hash = '''// DUSKLIGHT_BOTW_WGSL_PORTABILITY
+fn hash12(p: vec2f) -> f32 {
+    let p3 = fract(p.xyx * 0.1031);
+    let q = p3 + vec3f(dot(p3, p3.yzx + vec3f(33.33)));
+    return fract((q.x + q.y) * q.z);
+}
+'''
+    text = replace_once(text, old_hash, new_hash, "typed cloud-noise hash")
+    text = replace_once(
+        text,
+        "    let radius = select(2, 3, u.flags.z >= 2u);",
+        "    let radius = select(2i, 3i, u.flags.z >= 2u);",
+        "typed AO radius",
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print(f"Applied BOTW WGSL portability fixes: {path}")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -138,8 +171,9 @@ def main() -> int:
         raise RuntimeError(f"Dusklight source tree not found at {root}")
 
     changed = patch_source(root)
-    changed = patch_shader(root) or changed
-    print("BOTW projected-shadow preset ready" + (" (source updated)" if changed else ""))
+    changed = patch_shadow_shader(root) or changed
+    changed = patch_visual_wgsl(root) or changed
+    print("BOTW build-time presets ready" + (" (source updated)" if changed else ""))
     return 0
 
 
