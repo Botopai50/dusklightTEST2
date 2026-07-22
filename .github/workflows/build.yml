@@ -146,6 +146,7 @@ jobs:
     timeout-minutes: 120
     env:
       ANDROID_NDK_VERSION: '29.0.14206865'
+      ANDROID_BUILD_TOOLS_VERSION: '36.1.0'
 
     steps:
       - name: Checkout selected source
@@ -176,7 +177,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK and NDK
-        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "ndk;${ANDROID_NDK_VERSION}"
+        run: sdkmanager "platforms;android-36" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "ndk;${ANDROID_NDK_VERSION}"
 
       - name: Install Rust Android target
         run: |
@@ -220,24 +221,62 @@ jobs:
           ANDROID_STAGE_ABIS: arm64-v8a
         run: platforms/android/scripts/stage-jni-libs.sh
 
-      - name: Build Android APK
+      - name: Build unsigned Android APK
         working-directory: platforms/android
         run: ./gradlew :app:assembleRelease --rerun-tasks
 
-      - name: Verify and stage Android APK
+      - name: Align, sign and verify Android APK
         run: |
           set -euxo pipefail
-          APK='platforms/android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk'
-          test -s "$APK"
+
+          APK_DIR='platforms/android/app/build/outputs/apk/release'
+          UNSIGNED_APK="$(find "$APK_DIR" -maxdepth 1 -type f -name '*arm64-v8a*release*unsigned*.apk' -print -quit)"
+          if [ -z "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK="$(find "$APK_DIR" -maxdepth 1 -type f -name '*release*unsigned*.apk' -print -quit)"
+          fi
+          test -n "$UNSIGNED_APK"
+          test -s "$UNSIGNED_APK"
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          KEYSTORE="$RUNNER_TEMP/dusklight-ci.keystore"
+          ALIGNED_APK="$RUNNER_TEMP/dusklight-aligned.apk"
+          SIGNED_APK="$RUNNER_TEMP/dusklight-shipwright-celshade-arm64-v8a-signed.apk"
+
+          test -x "$ZIPALIGN"
+          test -x "$APKSIGNER"
+
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" \
+            -storepass android \
+            -keypass android \
+            -alias dusklight \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname 'CN=Dusklight Test Build,O=Botopai50,C=BR'
+
+          "$ZIPALIGN" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias dusklight \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED_APK" \
+            "$ALIGNED_APK"
+
+          "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK"
+
           mkdir -p upload/android upload/sdk
-          cp "$APK" upload/android/dusklight-shipwright-celshade-arm64-v8a.apk
+          cp "$SIGNED_APK" upload/android/dusklight-shipwright-celshade-arm64-v8a-signed.apk
           cp build/*/stub-android-*.so upload/sdk/
           find upload -maxdepth 3 -type f -print
 
-      - name: Upload Android build
+      - name: Upload signed Android build
         uses: actions/upload-artifact@v7
         with:
-          name: dusklight-shipwright-celshade-android-arm64-${{ github.run_number }}
+          name: dusklight-shipwright-celshade-android-arm64-signed-${{ github.run_number }}
           path: upload/
           if-no-files-found: error
           retention-days: 14
