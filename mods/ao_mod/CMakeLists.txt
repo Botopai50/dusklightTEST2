@@ -19,12 +19,3 @@ add_mod(ao_mod
     RES_DIR  res
     BUNDLE
 )
-
-# The root project already includes ao_mod in its aggregate in-tree mod build. Register the
-# cel-shading companion there as well without affecting standalone ao_mod builds.
-if (TARGET dusklight_mods AND NOT TARGET celshade_mod)
-    add_subdirectory(
-        "${CMAKE_CURRENT_LIST_DIR}/../celshade_mod"
-        "${CMAKE_CURRENT_BINARY_DIR}/../celshade_mod"
-    )
-endif ()
