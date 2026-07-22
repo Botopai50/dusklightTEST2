@@ -1,0 +1,123 @@
+name: Build Celshade Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/celshade-mod
+    paths:
+      - '.github/workflows/build-celshade-windows.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'sdk/**'
+      - 'src/**'
+      - 'include/**'
+      - 'mods/celshade_mod/**'
+      - 'mods/ao_mod/CMakeLists.txt'
+      - 'extern/aurora'
+      - '.gitmodules'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-celshade-windows.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'sdk/**'
+      - 'src/**'
+      - 'include/**'
+      - 'mods/celshade_mod/**'
+      - 'mods/ao_mod/CMakeLists.txt'
+      - 'extern/aurora'
+      - '.gitmodules'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: celshade-windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_ROOT: C:\vcpkg
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  DUSK_ENABLE_SENTRY_NATIVE: 'OFF'
+
+jobs:
+  build-windows-x64:
+    name: Windows x64 + Celshade
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Enable Visual Studio environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Restore VCPKG_ROOT
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_ENV -Value 'VCPKG_ROOT=C:\vcpkg'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          choco install ninja --no-progress -y
+          vcpkg install freetype:x64-windows zstd:x64-windows
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake --preset x-windows-ci-msvc `
+            -DDUSK_ENABLE_CODE_MODS=ON `
+            -DDUSK_ENABLE_SENTRY_NATIVE=OFF
+
+      - name: Build and install Dusklight
+        shell: pwsh
+        run: cmake --build --preset x-windows-ci-msvc --parallel 4
+
+      - name: Verify Celshade package
+        shell: pwsh
+        run: |
+          $mod = 'build/install/mods/celshade_mod.dusk'
+          if (-not (Test-Path $mod)) {
+            Write-Host 'Installed mods directory:'
+            if (Test-Path 'build/install/mods') {
+              Get-ChildItem 'build/install/mods' -Recurse | Format-Table FullName, Length
+            }
+            throw "Celshade package was not generated: $mod"
+          }
+
+          $size = (Get-Item $mod).Length
+          if ($size -le 0) {
+            throw "Celshade package is empty: $mod"
+          }
+
+          Write-Host "Celshade package ready: $mod ($size bytes)"
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $zip = 'dusklight-celshade-windows-x64.zip'
+          if (Test-Path $zip) {
+            Remove-Item $zip -Force
+          }
+          Compress-Archive -Path 'build/install/*' -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: dusklight-celshade-windows-x64-${{ github.run_number }}
+          path: |
+            dusklight-celshade-windows-x64.zip
+            build/install/mods/celshade_mod.dusk
+          if-no-files-found: error
+          retention-days: 14
