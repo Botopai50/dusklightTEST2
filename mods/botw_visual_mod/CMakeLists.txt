@@ -13,7 +13,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif ()
 
 add_mod(botw_visual_mod
-    FEATURES webgpu
+    FEATURES game webgpu
     SOURCES  src/mod.cpp
     MOD_JSON mod.json
     RES_DIR  res
