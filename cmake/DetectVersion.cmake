@@ -5,6 +5,8 @@ get_filename_component(_DUSK_VERSION_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUT
 
 set(DUSK_SENTRY_DSN "" CACHE STRING "Sentry DSN")
 set(DUSK_SENTRY_ENVIRONMENT "development" CACHE STRING "Sentry environment")
+option(DUSK_ENABLE_SHIPWRIGHT_CELSHADE
+        "Use integrated Ship of Harkinian-style per-pixel toon lighting" ON)
 
 set(DUSK_VERSION_OVERRIDE "" CACHE STRING "Override version string (skips git detection and format validation)")
 
@@ -91,6 +93,28 @@ macro(detect_version)
             set(DUSK_VERSION_CODE "1")
         endif ()
 
+    endif ()
+
+    # Aurora is a submodule. Patch its shader generator before add_subdirectory(extern/aurora)
+    # so the compiled renderer uses material-integrated lighting rather than a fullscreen filter.
+    if (DUSK_ENABLE_SHIPWRIGHT_CELSHADE AND
+            EXISTS "${_DUSK_VERSION_ROOT}/extern/aurora/lib/gx/shader.cpp")
+        find_program(_DUSK_PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+        execute_process(
+                COMMAND "${_DUSK_PYTHON_EXECUTABLE}"
+                        "${_DUSK_VERSION_ROOT}/scripts/apply_shipwright_celshade.py"
+                        --aurora-dir "${_DUSK_VERSION_ROOT}/extern/aurora"
+                WORKING_DIRECTORY "${_DUSK_VERSION_ROOT}"
+                RESULT_VARIABLE _dusk_celshade_result
+                OUTPUT_VARIABLE _dusk_celshade_output
+                ERROR_VARIABLE _dusk_celshade_error
+        )
+        if (NOT _dusk_celshade_result EQUAL 0)
+            message(FATAL_ERROR
+                    "Failed to apply integrated Shipwright celshade:\n${_dusk_celshade_output}${_dusk_celshade_error}")
+        endif ()
+        string(STRIP "${_dusk_celshade_output}" _dusk_celshade_output)
+        message(STATUS "${_dusk_celshade_output}")
     endif ()
 
     # Add version information to CI environment variables
